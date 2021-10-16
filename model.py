@@ -1,33 +1,39 @@
+from transformers import TFAutoModel
 from tensorflow.keras import layers
 import tensorflow as tf
 import numpy as np
 
 
 class Pointer2D(layers.Layer):
-    """ 2D pointor network """
+    """2D pointor network"""
 
-    def __init__(self, max_sequence_length=512, max_answer_length=8, **kwargs):
+    def __init__(self, 
+                 max_input_length: int = 512, 
+                 max_answer_length: int = 8, 
+                 **kwargs):
         super(Pointer2D, self).__init__(**kwargs)
-        self.max_sequence_length = max_sequence_length
+        self.max_input_length = max_input_length
         self.max_answer_length = max_answer_length
 
         # 2D permutation indicate matrix
-        permut_indicate = tf.ones((max_sequence_length, max_sequence_length))
-        permut_indicate = tf.linalg.band_part(permut_indicate, 0, max_answer_length-1)
+        permut_indicate = tf.ones((max_input_length, max_input_length))
+        permut_indicate = tf.linalg.band_part(
+            permut_indicate, 0, max_answer_length - 1)
         self.indices = tf.where(permut_indicate == 1)
 
         self.fc = layers.Dense(1)
 
     def call(self, inputs):
         embeddings, token_type_ids, attention_mask = inputs
-        mask = tf.cast(token_type_ids, embeddings.dtype) * tf.cast(attention_mask, embeddings.dtype)
+        mask = tf.cast(token_type_ids, embeddings.dtype) *\
+             tf.cast(attention_mask, embeddings.dtype)
         start_indices = self.indices[:, 0]
-        end_indices = self.indices[:, 1],
+        end_indices = (self.indices[:, 1],)
 
         # 2D permutation representation
         start, end = tf.split(embeddings, 2, axis=-1)
         _start = tf.gather(start, start_indices, axis=1)
-        _end = tf.gather(end,  end_indices, axis=1)
+        _end = tf.gather(end, end_indices, axis=1)
         states = _start + _end
 
         logits = self.fc(states)
@@ -44,14 +50,39 @@ class Pointer2D(layers.Layer):
         config = super(Pointer2D, self).get_config()
         config.update(
             {
-                'max_sequence_length': self.max_sequence_length,
-                'max_answer_length': self.max_answer_length
+                "max_input_length": self.max_input_length,
+                "max_answer_length": self.max_answer_length,
             }
         )
         return config
 
 
-if __name__ == '__main__':
-    x = tf.ones((1, 10, 4))
-    a, b = tf.split(x, 2, axis=-1)
-    print(a.shape, b.shape)
+def get_model(
+    model_name_or_path: str, max_input_length: int = 512, max_answer_length: int = 8
+):
+    """TF2 MRC Model
+
+    Args:
+        model_name_or_path (str): [description]
+        max_input_length (int, optional): [description]. Defaults to 512.
+        max_answer_length (int, optional): [description]. Defaults to 8.
+    """
+    input_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)
+    token_type_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)
+    attention_mask = layers.Input(shape=(max_input_length,), dtype=tf.bool)
+    bert = TFAutoModel.from_pretrained(model_name_or_path)
+    embeddings = bert(
+        input_ids=input_ids,
+        token_type_ids=token_type_ids,
+        attention_mask=attention_mask,
+    ).pooler_output
+    output = Pointer2D(max_input_length, max_answer_length)(
+        [embeddings, token_type_ids, attention_mask]
+    )
+
+    model = tf.keras.Model(inputs=[input_ids, token_type_ids, attention_mask], outputs=output)
+    return model
+
+
+if __name__ == "__main__":
+    print(get_model("bert-base-uncased"))

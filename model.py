@@ -11,6 +11,12 @@ class Pointer2D(layers.Layer):
                  max_input_length: int = 512, 
                  max_answer_length: int = 8, 
                  **kwargs):
+        """[summary]
+
+        Args:
+            max_input_length (int, optional): Max input length
+            max_answer_length (int, optional): Max answer length
+        """
         super(Pointer2D, self).__init__(**kwargs)
         self.max_input_length = max_input_length
         self.max_answer_length = max_answer_length
@@ -63,9 +69,9 @@ def get_model(
     """TF2 MRC Model
 
     Args:
-        model_name_or_path (str): [description]
-        max_input_length (int, optional): [description]. Defaults to 512.
-        max_answer_length (int, optional): [description]. Defaults to 8.
+        model_name_or_path (str): Model name or direction
+        max_input_length (int, optional): Max input length
+        max_answer_length (int, optional): Max answer length
     """
     input_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)
     token_type_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)

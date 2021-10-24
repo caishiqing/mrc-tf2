@@ -1,15 +1,17 @@
+from tensorflow.python.framework.ops import Tensor
 from transformers import TFAutoModel
 from tensorflow.keras import layers
 import tensorflow as tf
-import numpy as np
+from typing import List
+import os
 
 
 class Pointer2D(layers.Layer):
     """2D pointor network"""
 
-    def __init__(self, 
-                 max_input_length: int = 512, 
-                 max_answer_length: int = 8, 
+    def __init__(self,
+                 max_input_length: int = 512,
+                 max_answer_length: int = 8,
                  **kwargs):
         """[summary]
 
@@ -29,10 +31,10 @@ class Pointer2D(layers.Layer):
 
         self.fc = layers.Dense(1)
 
-    def call(self, inputs):
+    def call(self, inputs: List[tf.Tensor]) -> tf.Tensor:
         embeddings, token_type_ids, attention_mask = inputs
         mask = tf.cast(token_type_ids, embeddings.dtype) *\
-             tf.cast(attention_mask, embeddings.dtype)
+            tf.cast(attention_mask, embeddings.dtype)
         start_indices = self.indices[:, 0]
         end_indices = (self.indices[:, 1],)
 
@@ -63,9 +65,9 @@ class Pointer2D(layers.Layer):
         return config
 
 
-def get_model(
-    model_name_or_path: str, max_input_length: int = 512, max_answer_length: int = 8
-):
+def build_model(model_name_or_path: str,
+                max_input_length: int = 512,
+                max_answer_length: int = 8) -> tf.keras.Model:
     """TF2 MRC Model
 
     Args:
@@ -73,10 +75,15 @@ def get_model(
         max_input_length (int, optional): Max input length
         max_answer_length (int, optional): Max answer length
     """
+    if os.path.isdir(model_name_or_path):
+        config_path = os.path.join(model_name_or_path, 'config.json')
+        bert = TFAutoModel.from_config(config_path)
+    else:
+        bert = TFAutoModel.from_pretrained(model_name_or_path)
+
     input_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)
     token_type_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)
     attention_mask = layers.Input(shape=(max_input_length,), dtype=tf.bool)
-    bert = TFAutoModel.from_pretrained(model_name_or_path)
     embeddings = bert(
         input_ids=input_ids,
         token_type_ids=token_type_ids,
@@ -87,8 +94,8 @@ def get_model(
     )
 
     model = tf.keras.Model(inputs=[input_ids, token_type_ids, attention_mask], outputs=output)
-    return model
+    return model, bert
 
 
 if __name__ == "__main__":
-    print(get_model("bert-base-uncased"))
+    print(build_model("bert-base-uncased"))

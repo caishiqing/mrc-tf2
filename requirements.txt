@@ -1,0 +1,5 @@
+tensorflow_gpu>=2.1.0
+transformers>=4.8.1
+rouge==1.0.1
+fire==0.4.0
+yaml

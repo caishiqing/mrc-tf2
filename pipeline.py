@@ -26,7 +26,7 @@ class Pipeline(object):
         self.model, self.bert = build_model(
             model_name_or_path=params['model_name_or_path'],
             max_input_length=params['max_input_length'],
-            max_answer_length=params['max_input_length']
+            max_answer_length=params['max_answer_length']
         )
         self.params = params
 
@@ -73,7 +73,7 @@ class Pipeline(object):
         valid_examples = self.data_loader.pre_process(valid_data)
 
         x_train, y_train = self.data_loader.get_dataset(train_examples, 'train')
-        x_valid, y_valid = self.data_loader.get_dataset(valid_examples, 'valid')
+        x_valid, y_valid = self.data_loader.get_dataset(valid_examples, 'train')
 
         # build optimizer
         totle_steps = len(y_train)
@@ -98,7 +98,8 @@ class Pipeline(object):
 
         # train model
         self.model.fit(
-            x=(x_train, y_train),
+            x=x_train,
+            y=y_train,
             batch_size=batch_size,
             epochs=epochs,
             steps_per_epoch=steps_per_epoch,

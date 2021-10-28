@@ -14,17 +14,22 @@ def train(train_path: str,
           gpu: str = '0',
           **kwargs):
 
+    # normalize gpu
     if isinstance(gpu, int):
         gpu = str(gpu)
     elif isinstance(gpu, tuple):
         gpu = ','.join(map(str, gpu))
 
+    # set environment
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
     os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
     os.makedirs(save_path, exist_ok=True)
+    options = tf.data.Options()
+    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
     strategy = tf.distribute.MirroredStrategy()
     gpu_num = strategy.num_replicas_in_sync
 
+    # load params
     params = yaml.load(open('params.yaml'), Loader=yaml.SafeLoader)
     model_params = params['model']
     train_params = params['train']
@@ -35,9 +40,9 @@ def train(train_path: str,
         if path is None:
             return None
         if path.endswith('json'):
-            df = pd.read_json(path, lines=True)
+            df = pd.read_json(path, lines=True, encoding='utf-8')
         elif path.endswith('csv'):
-            df = pd.read_csv(path)
+            df = pd.read_csv(path, encoding='utf-8')
         return df.to_dict(orient='records')
 
     train_data = read_data(train_path)

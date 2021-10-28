@@ -36,7 +36,7 @@ class Pointer2D(layers.Layer):
         mask = tf.cast(token_type_ids, embeddings.dtype) *\
             tf.cast(attention_mask, embeddings.dtype)
         start_indices = self.indices[:, 0]
-        end_indices = (self.indices[:, 1],)
+        end_indices = self.indices[:, 1]
 
         # 2D permutation representation
         start, end = tf.split(embeddings, 2, axis=-1)
@@ -46,8 +46,8 @@ class Pointer2D(layers.Layer):
 
         logits = self.fc(states)
         logits = tf.squeeze(logits, -1)
-        _start_mask = tf.gather(mask, start_indices)
-        _end_mask = tf.gather(mask, end_indices)
+        _start_mask = tf.gather(mask, start_indices, axis=1)
+        _end_mask = tf.gather(mask, end_indices, axis=1)
         _mask = _start_mask * _end_mask
         logits -= 1e7 * (1 - _mask)
         output = tf.nn.softmax(logits, axis=-1)
@@ -84,11 +84,12 @@ def build_model(model_name_or_path: str,
     input_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)
     token_type_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)
     attention_mask = layers.Input(shape=(max_input_length,), dtype=tf.bool)
+
     embeddings = bert(
         input_ids=input_ids,
         token_type_ids=token_type_ids,
         attention_mask=attention_mask,
-    ).pooler_output
+    ).last_hidden_state
     output = Pointer2D(max_input_length, max_answer_length)(
         [embeddings, token_type_ids, attention_mask]
     )
@@ -98,4 +99,9 @@ def build_model(model_name_or_path: str,
 
 
 if __name__ == "__main__":
-    print(build_model("bert-base-uncased"))
+    embeddings = tf.random.uniform((1, 10, 4))
+    token_type_ids = tf.constant([[0, 0, 0, 1, 1, 1, 1, 1, 0, 0]])
+    attention_mask = tf.constant([[1, 1, 1, 1, 1, 1, 1, 1, 0, 0]])
+
+    pointer = Pointer2D(10, 3)
+    print(pointer([embeddings, token_type_ids, attention_mask])[0])

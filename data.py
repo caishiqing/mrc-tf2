@@ -46,6 +46,7 @@ class DataLoader(object):
 
             if record.get('answer'):
                 answer = record['answer']
+                example['answer'] = answer
                 answer_char_start = record.get('answer_start', record['context'].find(answer))
                 answer_char_end = record.get('answer_end', answer_char_start + len(answer))
                 sequence_ids = tokenized_example.sequence_ids(i)
@@ -64,7 +65,7 @@ class DataLoader(object):
                     continue
 
                 answer_token_start = token_start_id
-                while answer_token_start <= len(example['offset_mapping']) and \
+                while answer_token_start <= token_end_id and \
                         example['offset_mapping'][answer_token_start][0] <= answer_char_start:
                     answer_token_start += 1
                 example['answer_token_start'] = answer_token_start - 1
@@ -73,6 +74,11 @@ class DataLoader(object):
                 while example['offset_mapping'][answer_token_end][1] >= answer_char_end:
                     answer_token_end -= 1
                 example['answer_token_end'] = answer_token_end + 1
+
+                # answer length exceed
+                if example['answer_token_end']-example['answer_token_start'] >= self.max_answer_length:
+                    continue
+
                 example['label'] = self.indice_map[(example['answer_token_start'], example['answer_token_end'])]
             else:
                 example['context'] = record['context']
@@ -127,7 +133,7 @@ class DataLoader(object):
 
 
 if __name__ == '__main__':
-    tokenizer = AutoTokenizer.from_pretrained('bert-base-multilingual-cased')
+    tokenizer = AutoTokenizer.from_pretrained('hfl/chinese-roberta-wwm-ext')
     data_loader = DataLoader(tokenizer, 20, doc_stride=5)
 
     example = {
@@ -137,7 +143,7 @@ if __name__ == '__main__':
         'answer': '226cm',
         'answer_start': 4
     }
-    examples = data_loader.pre_process(example)
+    examples = data_loader._pre_process(example)
 
     preds = np.zeros(shape=(len(example), len(data_loader.indice_map)))
     for i in range(len(examples)):

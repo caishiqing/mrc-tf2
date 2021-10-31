@@ -1,7 +1,7 @@
-from numpy.lib.shape_base import expand_dims
 from transformers import AutoTokenizer
 from collections import OrderedDict
 from typing import List, Union
+import pandas as pd
 import numpy as np
 import uuid
 
@@ -38,7 +38,7 @@ class DataLoader(object):
 
         examples = []
         for i in range(len(tokenized_example['input_ids'])):
-            example = {}
+            example = {'qid': qid, 'context': record['context']}
             example['input_ids'] = tokenized_example['input_ids'][i]
             example['token_type_ids'] = tokenized_example['token_type_ids'][i]
             example['attention_mask'] = tokenized_example['attention_mask'][i]
@@ -80,15 +80,15 @@ class DataLoader(object):
                     continue
 
                 example['label'] = self.indice_map[(example['answer_token_start'], example['answer_token_end'])]
-            else:
-                example['context'] = record['context']
-                example['qid'] = qid
 
             examples.append(example)
 
         return examples
 
-    def pre_process(self, records: List[dict]):
+    def pre_process(self, records: Union[List[dict], pd.DataFrame]):
+        if isinstance(records, pd.DataFrame):
+            records = records.to_dict(orient='record')
+
         all_examples = []
         for record in records:
             examples = self._pre_process(record)
@@ -99,7 +99,7 @@ class DataLoader(object):
     def post_process(self, examples: List[dict], predicts: Union[List[list], np.ndarray]):
         argmax = np.argmax(predicts, axis=1)
         scores = np.max(predicts, axis=1)
-        results = OrderedDict()
+        cache, results = OrderedDict(), []
 
         for index, score, example in zip(argmax, scores, examples):
             token_start = self.start_indices[index]
@@ -108,11 +108,11 @@ class DataLoader(object):
             char_start = offset_mapping[token_start][0]
             char_end = offset_mapping[token_end][1]
             answer = example['context'][char_start:char_end]
-            results.setdefault(example['qid'], []).append((answer, score))
+            cache.setdefault(example['qid'], []).append((answer, score))
 
-        for key, val in results.items():
+        for key, val in cache.items():
             answer, score = max(val, key=lambda x: x[1])
-            results[key] = {'id': key, 'prediction': answer, 'score': float(round(score, 4))}
+            results.append({'id': key, 'prediction': answer, 'score': float(round(score, 4))})
 
         return results
 
@@ -130,6 +130,32 @@ class DataLoader(object):
                 labels[i] = example['label']
 
         return (input_ids, token_type_ids, attention_mask), labels
+
+
+def read_data(path: str, return_type: str = 'list'):
+    if path is None:
+        return None
+    if path.endswith('json'):
+        df = pd.read_json(path, lines=True, encoding='utf-8')
+    elif path.endswith('csv'):
+        df = pd.read_csv(path, encoding='utf-8')
+    else:
+        raise Exception('File format not support!')
+
+    if return_type == 'list':
+        return df.to_dict(orient='records')
+
+    return df
+
+
+def write_data(data: Union[List[dict], pd.DataFrame], path: str):
+    df = pd.DataFrame(data)
+    if path.endswith('.csv'):
+        df.to_csv(path, index=False)
+    elif path.endswith('.json'):
+        df.to_json(path, lines=True)
+    else:
+        raise Exception('File format not support!')
 
 
 if __name__ == '__main__':

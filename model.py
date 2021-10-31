@@ -1,9 +1,7 @@
-from tensorflow.python.framework.ops import Tensor
-from transformers import TFAutoModel
+from transformers import TFAutoModel, AutoConfig
 from tensorflow.keras import layers
 import tensorflow as tf
 from typing import List
-import os
 
 
 class Pointer2D(layers.Layer):
@@ -65,43 +63,25 @@ class Pointer2D(layers.Layer):
         return config
 
 
-def build_model(model_name_or_path: str,
-                max_input_length: int = 512,
-                max_answer_length: int = 8) -> tf.keras.Model:
-    """TF2 MRC Model
+def build_model(config: AutoConfig) -> tf.keras.Model:
 
-    Args:
-        model_name_or_path (str): Model name or direction
-        max_input_length (int, optional): Max input length
-        max_answer_length (int, optional): Max answer length
-    """
-    if os.path.isdir(model_name_or_path):
-        config_path = os.path.join(model_name_or_path, 'config.json')
-        bert = TFAutoModel.from_config(config_path)
+    if hasattr(config, 'model_name_or_path'):
+        bert = TFAutoModel.from_pretrained(config.model_name_or_path)
     else:
-        bert = TFAutoModel.from_pretrained(model_name_or_path)
+        bert = TFAutoModel.from_config(config)
 
-    input_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)
-    token_type_ids = layers.Input(shape=(max_input_length,), dtype=tf.int32)
-    attention_mask = layers.Input(shape=(max_input_length,), dtype=tf.bool)
+    input_ids = layers.Input(shape=(config.max_input_length,), dtype=tf.int32)
+    token_type_ids = layers.Input(shape=(config.max_input_length,), dtype=tf.int32)
+    attention_mask = layers.Input(shape=(config.max_input_length,), dtype=tf.bool)
 
     embeddings = bert(
         input_ids=input_ids,
         token_type_ids=token_type_ids,
         attention_mask=attention_mask,
     ).last_hidden_state
-    output = Pointer2D(max_input_length, max_answer_length)(
+    output = Pointer2D(config.max_input_length, config.max_answer_length)(
         [embeddings, token_type_ids, attention_mask]
     )
 
     model = tf.keras.Model(inputs=[input_ids, token_type_ids, attention_mask], outputs=output)
-    return model, bert
-
-
-if __name__ == "__main__":
-    embeddings = tf.random.uniform((1, 10, 4))
-    token_type_ids = tf.constant([[0, 0, 0, 1, 1, 1, 1, 1, 0, 0]])
-    attention_mask = tf.constant([[1, 1, 1, 1, 1, 1, 1, 1, 0, 0]])
-
-    pointer = Pointer2D(10, 3)
-    print(pointer([embeddings, token_type_ids, attention_mask])[0])
+    return model

@@ -139,8 +139,8 @@ class Pipeline(object):
             rouge = Rouge()
 
             def rouge_l(row):
-                predictions = self.tokenizer.tokenize(row['prediction'])
-                ground_truth = self.tokenizer.tokenize(row['answer'])
+                predictions = ' '.join(self.tokenizer.tokenize(row['prediction']))
+                ground_truth = ' '.join(self.tokenizer.tokenize(row['answer']))
                 score = rouge.get_scores(predictions, ground_truth)[0]['rouge-l']['f']
                 return score
 

@@ -30,9 +30,7 @@ class Pointer2D(layers.Layer):
         self.fc = layers.Dense(1)
 
     def call(self, inputs: List[tf.Tensor]) -> tf.Tensor:
-        embeddings, token_type_ids, attention_mask = inputs
-        mask = tf.cast(token_type_ids, embeddings.dtype) *\
-            tf.cast(attention_mask, embeddings.dtype)
+        embeddings, mask = inputs
         start_indices = self.indices[:, 0]
         end_indices = self.indices[:, 1]
 
@@ -46,7 +44,7 @@ class Pointer2D(layers.Layer):
         logits = tf.squeeze(logits, -1)
         _start_mask = tf.gather(mask, start_indices, axis=1)
         _end_mask = tf.gather(mask, end_indices, axis=1)
-        _mask = _start_mask * _end_mask
+        _mask = tf.cast(_start_mask & _end_mask, dtype=logits.dtype)
         logits -= 1e7 * (1 - _mask)
         output = tf.nn.softmax(logits, axis=-1)
 
@@ -66,22 +64,29 @@ class Pointer2D(layers.Layer):
 def build_model(config: AutoConfig) -> tf.keras.Model:
 
     if hasattr(config, 'model_name_or_path'):
-        bert = TFAutoModel.from_pretrained(config.model_name_or_path)
+        try:
+            bert = TFAutoModel.from_pretrained(config.model_name_or_path)
+        except:
+            bert = TFAutoModel.from_pretrained(config.model_name_or_path, from_pt=True)
     else:
         bert = TFAutoModel.from_config(config)
 
-    input_ids = layers.Input(shape=(config.max_input_length,), dtype=tf.int32)
-    token_type_ids = layers.Input(shape=(config.max_input_length,), dtype=tf.int32)
-    attention_mask = layers.Input(shape=(config.max_input_length,), dtype=tf.bool)
+    inputs = {
+        'input_ids': layers.Input(shape=(config.max_input_length,), dtype=tf.int32),
+        'attention_mask': layers.Input(shape=(config.max_input_length,), dtype=tf.bool),
+        'answer_mask': layers.Input(shape=(config.max_input_length,), dtype=tf.bool)
+    }
+    if config.model_type in ['bert', 'roberta']:
+        inputs['token_type_ids'] = layers.Input(shape=(config.max_input_length,), dtype=tf.int32)
 
     embeddings = bert(
-        input_ids=input_ids,
-        token_type_ids=token_type_ids,
-        attention_mask=attention_mask,
+        input_ids=inputs['input_ids'],
+        attention_mask=inputs['attention_mask'],
+        token_type_ids=inputs.get('token_type_ids'),
     ).last_hidden_state
     output = Pointer2D(config.max_input_length, config.max_answer_length)(
-        [embeddings, token_type_ids, attention_mask]
+        [embeddings, inputs['answer_mask']]
     )
 
-    model = tf.keras.Model(inputs=[input_ids, token_type_ids, attention_mask], outputs=output)
+    model = tf.keras.Model(inputs=inputs, outputs=output)
     return model

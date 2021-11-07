@@ -37,7 +37,7 @@ class Pipeline(object):
         models = []
         for i, file in enumerate(filter(lambda x: x.endswith('.h5'), os.listdir(model_path))):
             model = build_model(config)
-            model._name = '{}_{}'.fromat(model._name, i)
+            model._name = '{}_{}'.format(model._name, i)
             model.load_weights(os.path.join(model_path, file))
             models.append(model)
 
@@ -73,7 +73,7 @@ class Pipeline(object):
         # training params
         batch_size = kwargs.get('batch_size', 8)
         epochs = kwargs.get('epochs', 10)
-        steps_per_epoch = kwargs.get('steps_per_epochs', 200)
+        steps_per_epoch = kwargs.get('steps_per_epoch', 200)
         learning_rate = kwargs.get('learning_rate', 2e-5)
         warmup_proportion = kwargs.get('warmup_proportion', 0.1)
 

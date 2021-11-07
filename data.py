@@ -3,6 +3,7 @@ from collections import OrderedDict
 from typing import List, Union
 import pandas as pd
 import numpy as np
+import random
 import uuid
 
 
@@ -38,48 +39,64 @@ class DataLoader(object):
 
         examples = []
         for i in range(len(tokenized_example['input_ids'])):
+            sequence_ids = tokenized_example.sequence_ids(i)
             example = {'qid': qid, 'context': record['context']}
             example['input_ids'] = tokenized_example['input_ids'][i]
-            example['token_type_ids'] = tokenized_example['token_type_ids'][i]
             example['attention_mask'] = tokenized_example['attention_mask'][i]
             example['offset_mapping'] = tokenized_example['offset_mapping'][i]
+            example['answer_mask'] = np.asarray(sequence_ids, dtype=np.bool)
+            example['answer_mask'][0] = 1  # left for no answer instance
+            if 'token_type_ids' in tokenized_example:
+                example['token_type_ids'] = tokenized_example['token_type_ids'][i]
 
-            if record.get('answer'):
+            if 'answer' in record:
                 answer = record['answer']
-                example['answer'] = answer
-                answer_char_start = record.get('answer_start', record['context'].find(answer))
-                answer_char_end = record.get('answer_end', answer_char_start + len(answer))
-                sequence_ids = tokenized_example.sequence_ids(i)
+                if not answer:
+                    # no answer in context
+                    answer_token_start = 0
+                    answer_token_end = 0
+                else:
+                    example['answer'] = answer
+                    answer_char_start = record.get('answer_start', record['context'].find(answer))
+                    answer_char_end = record.get('answer_end', answer_char_start + len(answer))
 
-                token_start_id = 0
-                while sequence_ids[token_start_id] != 1:
-                    token_start_id += 1
+                    token_start_id = 0
+                    while sequence_ids[token_start_id] != 1:
+                        token_start_id += 1
 
-                token_end_id = len(example['input_ids']) - 1
-                while sequence_ids[token_end_id] != 1:
-                    token_end_id -= 1
+                    token_end_id = len(example['input_ids']) - 1
+                    while sequence_ids[token_end_id] != 1:
+                        token_end_id -= 1
 
-                # answer is not completely in sequence
-                if answer_char_start < example['offset_mapping'][token_start_id][0] \
-                        or answer_char_end > example['offset_mapping'][token_end_id][1]:
-                    continue
+                    if answer_char_end < example['offset_mapping'][token_start_id][0] \
+                            or answer_char_start > example['offset_mapping'][token_end_id][1]:
+                        # answer completely not in context
+                        answer_token_start = 0
+                        answer_token_end = 0
+                    elif answer_char_start >= example['offset_mapping'][token_start_id][0] \
+                            and answer_char_end <= example['offset_mapping'][token_end_id][1]:
+                        # answer completely in context
+                        answer_token_start = token_start_id
+                        while answer_token_start <= token_end_id and \
+                                example['offset_mapping'][answer_token_start][0] <= answer_char_start:
+                            answer_token_start += 1
+                        answer_token_start -= 1
 
-                answer_token_start = token_start_id
-                while answer_token_start <= token_end_id and \
-                        example['offset_mapping'][answer_token_start][0] <= answer_char_start:
-                    answer_token_start += 1
-                example['answer_token_start'] = answer_token_start - 1
+                        answer_token_end = token_end_id
+                        while example['offset_mapping'][answer_token_end][1] >= answer_char_end:
+                            answer_token_end -= 1
+                        answer_token_end += 1
+                    else:
+                        # answer partialy in context
+                        continue
 
-                answer_token_end = token_end_id
-                while example['offset_mapping'][answer_token_end][1] >= answer_char_end:
-                    answer_token_end -= 1
-                example['answer_token_end'] = answer_token_end + 1
+                    # answer length exceed
+                    if answer_token_end-answer_token_start >= self.max_answer_length:
+                        continue
 
-                # answer length exceed
-                if example['answer_token_end']-example['answer_token_start'] >= self.max_answer_length:
-                    continue
-
-                example['label'] = self.indice_map[(example['answer_token_start'], example['answer_token_end'])]
+                example['answer_token_start'] = answer_token_start
+                example['answer_token_end'] = answer_token_end
+                example['label'] = self.indice_map[(answer_token_start, answer_token_end)]
 
             examples.append(example)
 
@@ -97,6 +114,8 @@ class DataLoader(object):
         return all_examples
 
     def post_process(self, examples: List[dict], predicts: Union[List[list], np.ndarray]):
+        predicts = np.asarray(predicts)
+        predicts[:, 0] = 0
         argmax = np.argmax(predicts, axis=1)
         scores = np.max(predicts, axis=1)
         cache, results = OrderedDict(), []
@@ -108,6 +127,16 @@ class DataLoader(object):
             char_start = offset_mapping[token_start][0]
             char_end = offset_mapping[token_end][1]
             answer = example['context'][char_start:char_end]
+            if not answer:
+                print(
+                    answer,
+                    token_start, token_end,
+                    char_start, char_end,
+                    offset_mapping[token_start],
+                    example['input_ids'][token_start],
+                    example['token_type_ids'][token_start],
+                    score
+                )
             cache.setdefault(example['qid'], []).append((answer, score))
 
         for key, val in cache.items():
@@ -117,19 +146,27 @@ class DataLoader(object):
         return results
 
     def get_dataset(self, examples: List[dict], mode: str = 'train'):
-        input_ids = np.zeros(shape=(len(examples), self.max_input_length), dtype=np.int32)
-        token_type_ids = np.zeros(shape=(len(examples), self.max_input_length), dtype=np.int32)
-        attention_mask = np.zeros(shape=(len(examples), self.max_input_length), dtype=np.int32)
+        random.shuffle(examples)
+        inputs = {
+            'input_ids': np.zeros(shape=(len(examples), self.max_input_length), dtype=np.int32),
+            'attention_mask': np.zeros(shape=(len(examples), self.max_input_length), dtype=np.int32),
+            'answer_mask': np.zeros(shape=(len(examples), self.max_input_length), dtype=np.int32)
+        }
+        if examples[0].get('token_type_ids'):
+            inputs['token_type_ids'] = np.zeros(shape=(len(examples), self.max_input_length), dtype=np.int32)
+
         labels = np.zeros(shape=(len(examples),), dtype=np.int32) if mode == 'train' else None
 
         for i, example in enumerate(examples):
-            input_ids[i] = example['input_ids']
-            token_type_ids[i] = example['token_type_ids']
-            attention_mask[i] = example['attention_mask']
+            inputs['input_ids'][i] = example['input_ids']
+            inputs['attention_mask'][i] = example['attention_mask']
+            inputs['answer_mask'][i] = example['answer_mask']
+            if 'token_type_ids' in inputs:
+                inputs['token_type_ids'][i] = example['token_type_ids']
             if mode == 'train':
                 labels[i] = example['label']
 
-        return (input_ids, token_type_ids, attention_mask), labels
+        return inputs, labels
 
 
 def read_data(path: str, return_type: str = 'list'):

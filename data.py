@@ -40,7 +40,7 @@ class DataLoader(object):
         examples = []
         for i in range(len(tokenized_example['input_ids'])):
             sequence_ids = tokenized_example.sequence_ids(i)
-            example = {'qid': qid, 'context': record['context']}
+            example = {'id': qid, 'context': record['context']}
             example['input_ids'] = tokenized_example['input_ids'][i]
             example['attention_mask'] = tokenized_example['attention_mask'][i]
             example['offset_mapping'] = tokenized_example['offset_mapping'][i]
@@ -59,6 +59,8 @@ class DataLoader(object):
                     example['answer'] = answer
                     answer_char_start = record.get('answer_start', record['context'].find(answer))
                     answer_char_end = record.get('answer_end', answer_char_start + len(answer))
+                    example['answer_start'] = answer_char_start
+                    example['answer_end'] = answer_char_end
 
                     token_start_id = 0
                     while sequence_ids[token_start_id] != 1:
@@ -127,17 +129,7 @@ class DataLoader(object):
             char_start = offset_mapping[token_start][0]
             char_end = offset_mapping[token_end][1]
             answer = example['context'][char_start:char_end]
-            if not answer:
-                print(
-                    answer,
-                    token_start, token_end,
-                    char_start, char_end,
-                    offset_mapping[token_start],
-                    example['input_ids'][token_start],
-                    example['token_type_ids'][token_start],
-                    score
-                )
-            cache.setdefault(example['qid'], []).append((answer, score))
+            cache.setdefault(example['id'], []).append((answer, score))
 
         for key, val in cache.items():
             answer, score = max(val, key=lambda x: x[1])
@@ -179,6 +171,11 @@ def read_data(path: str, return_type: str = 'list'):
     else:
         raise Exception('File format not support!')
 
+    if 'id' not in df.columns:
+        df['id'] = df.index
+    else:
+        df['id'] = np.where(df['id'].isnull(), df.index.map(str), df['id'])
+
     if return_type == 'list':
         return df.to_dict(orient='records')
 
@@ -200,7 +197,7 @@ if __name__ == '__main__':
     data_loader = DataLoader(tokenizer, 20, doc_stride=5)
 
     example = {
-        'qid': '123456',
+        'id': '123456',
         'question': '姚明有多高？',
         'context': '姚明身高226cm，被称为小巨人。',
         'answer': '226cm',
@@ -211,7 +208,7 @@ if __name__ == '__main__':
     preds = np.zeros(shape=(len(example), len(data_loader.indice_map)))
     for i in range(len(examples)):
         examples[i]['context'] = example['context']
-        examples[i]['qid'] = example['qid']
+        examples[i]['id'] = example['id']
         preds[i][examples[i]['label']] = 1
 
     print(examples)

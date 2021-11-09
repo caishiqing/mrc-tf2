@@ -1,10 +1,10 @@
 from transformers import AutoTokenizer, AutoConfig
 from tensorflow.keras import layers
 from optimizer import AdamWarmup
+from typing import List, Union
 from model import build_model
 from data import DataLoader
 import tensorflow as tf
-from typing import List
 from rouge import Rouge
 from copy import copy
 import pandas as pd
@@ -63,12 +63,17 @@ class Pipeline(object):
 
     def train(self,
               save_path: str,
-              train_data: List[dict],
-              valid_data: List[dict] = None,
+              train_data: Union[List[dict], pd.DataFrame],
+              valid_data: Union[List[dict], pd.DataFrame] = None,
               valid_size: float = 0.1,
               model_name: str = None,
               evaluate: bool = True,
               **kwargs):
+
+        if isinstance(train_data, pd.DataFrame):
+            train_data = train_data.to_dict(orient='records')
+        if valid_data is not None and isinstance(valid_data, pd.DataFrame):
+            valid_data = valid_data.to_dict(orient='records')
 
         # training params
         batch_size = kwargs.get('batch_size', 8)
@@ -148,9 +153,81 @@ class Pipeline(object):
             score = df['score'].mean()
             print('Rouge-L: {:.4}'.format(score))
 
-    def test(self, test_data: List[dict], batch_size=32):
+    def test(self, test_data: List[dict], batch_size: int = 32):
         test_examples = self.data_loader.pre_process(test_data)
         x_test, _ = self.data_loader.get_dataset(test_examples, mode='test')
         preds = self.model.predict(x_test, batch_size=batch_size)
         results = self.data_loader.post_process(test_examples, preds)
         return results
+
+    def fix_offset(self, data: Union[List[dict], pd.DataFrame], batch_size: int = 32):
+        import re
+        from copy import deepcopy
+
+        if isinstance(data, pd.DataFrame):
+            data = data.to_dict(orient='records')
+
+        ambiguous_records = []
+        for record in data:
+            context, answer = record['context'], record['answer']
+            answer_offsets = [(s.start(), s.end()) for s in re.finditer(re.escape(answer), re.escape(context))]
+            if len(answer_offsets) > 1:
+                for answer_start, answer_end in answer_offsets:
+                    _record = deepcopy(record)
+                    _record['answer_start'] = answer_start
+                    _record['answer_end'] = answer_end
+                    ambiguous_records.append(_record)
+
+        examples = self.data_loader.pre_process(ambiguous_records)
+        examples = [example for example in examples if example['label'] != 0]
+        inputs, labels = self.data_loader.get_dataset(examples, mode='train')
+        preds = self.model.predict(inputs, batch_size=batch_size)
+        fixed_offsets = []
+        for example, label, pred in zip(examples, labels, preds):
+            fixed_offsets.append(
+                {
+                    'id': example['id'],
+                    'score': pred[label],
+                    'answer_start': example['answer_start'],
+                    'answer_end': example['answer_end']
+                }
+            )
+        fixed_offsets = pd.DataFrame(fixed_offsets).sort_values(
+            'score', ascending=False).drop_duplicates(['id']).set_index(
+            'id', drop=True).to_dict(orient='index')
+
+        fixed_data = []
+        for record in data:
+            pid = record['id']
+            if pid in fixed_offsets:
+                record['answer_start'] = fixed_offsets[pid]['answer_start']
+                if 'answer_end' in record:
+                    record['answer_end'] = fixed_offsets[pid]['answer_end']
+
+            fixed_data.append(record)
+
+        return fixed_data
+
+
+if __name__ == '__main__':
+    model_path = 'models/webqa'
+    data = [
+        {
+            'id': 'aaa',
+            'question': '姚明妻子是谁？',
+            'context': '姚明妻子是叶莉，他与叶莉有一个女儿。',
+            'answer': '叶莉',
+            'answer_start': 10
+        },
+        {
+            'id': 'bbb',
+            'question': '姚明有多高？',
+            'context': '226cm有多高，姚明身高226cm，被称为小巨人。',
+            'answer': '226cm',
+            'answer_start': 0
+        }
+
+    ]
+    pipeline = Pipeline.from_pretrained(model_path)
+    fixed_data = pipeline.fix_offset(data)
+    print(fixed_data)

@@ -6,7 +6,6 @@ from model import build_model
 from data import DataLoader
 import tensorflow as tf
 from rouge import Rouge
-from copy import copy
 import pandas as pd
 import random
 import os
@@ -47,16 +46,21 @@ class Pipeline(object):
             model = models[0]
         else:
             # If trained k models by k-fold
-            input_ids = layers.Input(shape=(config.max_input_length,), dtype=tf.int32)
-            token_type_ids = layers.Input(shape=(config.max_input_length,), dtype=tf.int32)
-            attention_mask = layers.Input(shape=(config.max_input_length,), dtype=tf.bool)
+            inputs = {
+                'input_ids': layers.Input(shape=(config.max_input_length,), dtype=tf.int32),
+                'attention_mask': layers.Input(shape=(config.max_input_length,), dtype=tf.bool),
+                'answer_mask': layers.Input(shape=(config.max_input_length,), dtype=tf.bool)
+            }
+            if config.model_type in ['bert', 'roberta']:
+                inputs['token_type_ids'] = layers.Input(shape=(config.max_input_length,), dtype=tf.int32)
+
             outputs = []
             for model in models:
-                outputs.append(model([input_ids, token_type_ids, attention_mask]))
+                outputs.append(model(inputs))
 
             # merge models by average
-            output = layers.Average(outputs)
-            model = tf.keras.Model(inputs=[input_ids, token_type_ids, attention_mask], outputs=output)
+            output = layers.Average()(outputs)
+            model = tf.keras.Model(inputs=inputs, outputs=output)
 
         pipeline = Pipeline(data_loader, model, config)
         return pipeline

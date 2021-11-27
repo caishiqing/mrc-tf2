@@ -1,3 +1,4 @@
+from numpy.lib.arraysetops import isin
 from transformers import AutoTokenizer
 from collections import OrderedDict
 from typing import List, Union
@@ -161,9 +162,22 @@ class DataLoader(object):
         return inputs, labels
 
 
-def read_data(path: str, return_type: str = 'list'):
+def read_data(path: Union[str, List[dict], pd.DataFrame], return_type: str = 'list'):
     if path is None:
         return None
+
+    assert return_type in ('list', 'df')
+    assert type(path) in (str, list, pd.DataFrame)
+    if not isinstance(path, str):
+        if return_type == 'list':
+            if isinstance(path, list):
+                return path
+            return path.to_dict(orient='records')
+        else:
+            if isinstance(path, pd.DataFrame):
+                return path
+            return pd.DataFrame(path)
+
     if path.endswith('json'):
         df = pd.read_json(path, lines=True, encoding='utf-8')
     elif path.endswith('csv'):
